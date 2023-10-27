@@ -58,6 +58,6 @@ echo '--------------------------------------------------'
 echo '|            Установка zsh и ohmyzsh             |'
 echo '--------------------------------------------------'
 
-pacman -S zsh
+pacman -S zsh git --noconfirm
 chsh -s /bin/zsh
 sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
