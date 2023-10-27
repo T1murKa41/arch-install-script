@@ -33,7 +33,7 @@ echo '|            Установка XFCE4 и SDDM              |'
 echo '--------------------------------------------------'
 
 pacman -S sddm xfce4 --nocinfirm
-systemctl enable sddm.service
+systemctl enable sddm
 sleep $sleep
 
 case $ucode in
