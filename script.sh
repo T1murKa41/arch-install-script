@@ -58,6 +58,6 @@ hwclock --systohc
 ln -sf /usr/share/zoneinfo/Europe/Moscow /etc/localtime
 timedatectl status
 
-arch-chroot /mnt sh -c "$(cat chroot.sh)" $username $hostname  $pass
+arch-chroot /mnt sh -c "$(cat chroot)" $username $hostname  $pass
 
 sleep $sleep
