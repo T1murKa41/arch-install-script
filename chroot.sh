@@ -1,0 +1,63 @@
+#!/bin/bash
+
+ucode=intel
+
+echo '>>Установка текстовых редакторов и пакета sudo'
+pacman -S vim nano sudo --noconfirm
+sleep $sleep
+
+echo '>>Настройка файлов hostname и hosts'
+echo $hostname > /etc/hostname
+echo -e '127.0.0.1    localhost\n::1          localhost\n' > /etc/hosts
+
+echo '>> Пароль root'
+(
+	echo $pass
+	echo $pass
+) | passwd
+useradd -m $username
+usermod -aG wheel,audio,video,storage $username
+echo '>> Пароль пользователя '$username
+(
+	echo $pass
+	echo $pass
+) | passwd $username
+sleep $sleep
+
+echo '>> Настройка прав администратора'
+
+echo '%wheel ALL=(ALL) ALL' >> /etc/sudoers
+
+echo '--------------------------------------------------'
+echo '|            Установка XFCE4 и SDDM              |'
+echo '--------------------------------------------------'
+
+pacman -S sddm xfce4 --nocinfirm
+systemctl enable sddm.service
+sleep $sleep
+
+case $ucode in
+	intel)
+		echo '>>установка микрокода для intel'
+		pacman -Sy intel-ucode --noconfirm
+		;;
+	*)
+		echo 'установка микрокода не требуется'
+		;;
+esac
+
+echo '--------------------------------------------------'
+echo '|               Установка rEFInd                  |'
+echo '--------------------------------------------------'
+
+pacman -Sy refind gdisk --noconfirm 
+refind-install
+sed -i "options  'root=PARTUUID=/dev/nvme0n1p5 rw add_efi_memmap initrd=boot\intel-ucode.img'" /boot/efi/EFI/refind/refind.conf
+
+echo '--------------------------------------------------'
+echo '|            Установка zsh и ohmyzsh             |'
+echo '--------------------------------------------------'
+
+pacman -S zsh
+chsh -s /bin/zsh
+sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
