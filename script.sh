@@ -42,7 +42,7 @@ echo '|             Установка Arch Linux               |'
 echo '--------------------------------------------------'
 
 echo '>> Установка базовой системы'
-pacstrap /mnt base linux linux-software
+pacstrap /mnt base linux linux-firmware
 echo '>>Генерация таблицы файловых систем'
 genfstab /mnt >> /mnt/etc/fstab
 
@@ -58,6 +58,6 @@ hwclock --systohc
 ln -sf /usr/share/zoneinfo/Europe/Moscow /etc/localtime
 timedatectl status
 
-arch-chroot /mnt sh -c "$(cat chroot.sh)" $username $hostname  $pass
+arch-chroot /mnt sh -c "$(cat chroot)" $username $hostname  $pass
 
 sleep $sleep
