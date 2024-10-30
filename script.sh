@@ -1,9 +1,5 @@
 #!/bin/bash
 
-
-username='ra1nyy'
-hostname='BBR-WAH9'
-pass='arch'
 sleep=10
 
 clear
@@ -19,9 +15,23 @@ locale-gen
 
 export LANG=ru_RU.UTF-8
 
+echo 'Введите ваше дисковое устройство (например /dev/sda)'
+read disk
+
+echo 'Введите имя пользователя'
+read username
+
+echo 'Введите имя хоста (компьютера)'
+read hostname
+
+echo 'Введите пароль пользователя'
+read pass
+
+
 echo '--------------------------------------------------'
 echo '|          Форматирование разделов               |'
 echo '--------------------------------------------------'
+
 
 mkfs.ext4 /dev/nvme0n1p5
 

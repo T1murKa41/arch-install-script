@@ -36,15 +36,6 @@ pacman -S sddm xfce4 --nocinfirm
 systemctl enable sddm
 sleep $sleep
 
-case $ucode in
-	intel)
-		echo '>>установка микрокода для intel'
-		pacman -Sy intel-ucode --noconfirm
-		;;
-	*)
-		echo 'установка микрокода не требуется'
-		;;
-esac
 
 echo '--------------------------------------------------'
 echo '|               Установка rEFInd                  |'
@@ -52,7 +43,7 @@ echo '--------------------------------------------------'
 
 pacman -Sy refind gdisk --noconfirm 
 refind-install
-sed -i "options  'root=PARTUUID=/dev/nvme0n1p5 rw add_efi_memmap initrd=boot\intel-ucode.img'" /boot/efi/EFI/refind/refind.conf
+sed -i "options  'root=PARTUUID=/dev/nvme0n1p5 rw add_efi_memmap'" /boot/efi/EFI/refind/refind.conf
 
 echo '--------------------------------------------------'
 echo '|            Установка zsh и ohmyzsh             |'
