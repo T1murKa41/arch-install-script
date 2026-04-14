@@ -1,10 +1,12 @@
 #!/bin/bash
 
-sleep=10
+set -e
+
+sleep=5
 
 clear
 
-echo '>> Russification...'
+echo '>> Русификация консоли...'
 loadkeys ru
 setfont cyr-sun16
 echo -e 'KEYMAP=ru\nFONT=cyr-sun16\n' > /etc/vconsole.conf
@@ -15,7 +17,7 @@ locale-gen
 
 export LANG=ru_RU.UTF-8
 
-echo 'Введите ваше дисковое устройство (например /dev/sda)'
+echo 'Введите ваше дисковое устройство (например /dev/sda или /dev/nvme0n1)'
 read disk
 
 echo 'Введите имя пользователя'
@@ -25,15 +27,31 @@ echo 'Введите имя хоста (компьютера)'
 read hostname
 
 echo 'Введите пароль пользователя'
-read pass
+read -s pass
+echo
+echo 'Подтвердите пароль'
+read -s pass_confirm
+echo
 
+if [ "$pass" != "$pass_confirm" ]; then
+  echo 'Ошибка: пароли не совпадают!'
+  exit 1
+fi
+
+# Определяем разделы на основе типа диска (nvme или sata/scsi)
+if [[ "$disk" == *"nvme"* ]]; then
+  efi_part="${disk}p1"
+  root_part="${disk}p5"
+else
+  efi_part="${disk}1"
+  root_part="${disk}5"
+fi
 
 echo '--------------------------------------------------'
 echo '|          Форматирование разделов               |'
 echo '--------------------------------------------------'
 
-
-mkfs.ext4 /dev/nvme0n1p5
+mkfs.ext4 "$root_part"
 
 sleep $sleep
 
@@ -41,9 +59,8 @@ echo '--------------------------------------------------'
 echo '|             Подключение разделов               |'
 echo '--------------------------------------------------'
 
-echo ">> Подключение разделов"
-mount /dev/nvme0n1p5 /mnt
-mount --mkdir /dev/nvme0n1p1 /boot/efi
+mount "$root_part" /mnt
+mount --mkdir "$efi_part" /mnt/boot/efi
 
 sleep $sleep
 
@@ -52,22 +69,28 @@ echo '|             Установка Arch Linux               |'
 echo '--------------------------------------------------'
 
 echo '>> Установка базовой системы'
-pacstrap /mnt base linux linux-firmware
-echo '>>Генерация таблицы файловых систем'
-genfstab /mnt >> /mnt/etc/fstab
+pacstrap /mnt base base-devel linux linux-firmware linux-headers
+
+echo '>> Генерация таблицы файловых систем (по UUID)'
+genfstab -U /mnt >> /mnt/etc/fstab
 
 sleep $sleep
 
-echo '>> Установка настройки сети'
-pacman -Sy networkmanager --noconfirm
-systemctl enable NetworkManager
-
-echo ">> Синхронизация времени"
+echo '>> Синхронизация времени'
 timedatectl set-ntp true
-hwclock --systohc
-ln -sf /usr/share/zoneinfo/Europe/Moscow /etc/localtime
-timedatectl status
 
-arch-chroot /mnt sh -c "$(cat chroot)" $username $hostname  $pass
+echo '>> Копирование chroot-скрипта в /mnt'
+cp chroot /mnt/chroot_setup.sh
+chmod +x /mnt/chroot_setup.sh
+
+echo '>> Запуск chroot-установки'
+arch-chroot /mnt /chroot_setup.sh "$username" "$hostname" "$pass" "$root_part"
+
+echo '>> Очистка временных файлов'
+rm /mnt/chroot_setup.sh
+
+echo '--------------------------------------------------'
+echo '|       Установка завершена! Перезагрузите       |'
+echo '--------------------------------------------------'
 
 sleep $sleep

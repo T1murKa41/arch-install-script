@@ -1,54 +1,93 @@
 #!/bin/bash
 
+set -e
+
+username=$1
+hostname=$2
+pass=$3
+root_part=$4
+
 ucode=intel
 
-echo '>>Установка текстовых редакторов и пакета sudo'
+echo '>> Настройка часового пояса'
+ln -sf /usr/share/zoneinfo/Europe/Moscow /etc/localtime
+hwclock --systohc
+
+echo '>> Настройка локали'
+sed -i 's/#en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/g' /etc/locale.gen
+sed -i 's/#ru_RU.UTF-8 UTF-8/ru_RU.UTF-8 UTF-8/g' /etc/locale.gen
+locale-gen
+echo 'LANG=ru_RU.UTF-8' > /etc/locale.conf
+
+echo '>> Настройка клавиатуры в консоли'
+echo -e 'KEYMAP=ru\nFONT=cyr-sun16\n' > /etc/vconsole.conf
+
+echo '>> Установка текстовых редакторов и sudo'
 pacman -S vim nano sudo --noconfirm
-sleep $sleep
 
-echo '>>Настройка файлов hostname и hosts'
-echo $hostname > /etc/hostname
-echo -e '127.0.0.1    localhost\n::1          localhost\n' > /etc/hosts
+echo '>> Настройка hostname и hosts'
+echo "$hostname" > /etc/hostname
+cat > /etc/hosts <<EOF
+127.0.0.1    localhost
+::1          localhost
+127.0.1.1    ${hostname}.localdomain    ${hostname}
+EOF
 
-echo '>> Пароль root'
-(
-	echo $pass
-	echo $pass
-) | passwd
-useradd -m $username
-usermod -aG wheel,audio,video,storage $username
-echo '>> Пароль пользователя '$username
-(
-	echo $pass
-	echo $pass
-) | passwd $username
-sleep $sleep
+echo '>> Установка сети'
+pacman -S networkmanager --noconfirm
+systemctl enable NetworkManager
 
-echo '>> Настройка прав администратора'
+echo '>> Установка микрокода процессора'
+pacman -S "${ucode}-ucode" --noconfirm
 
-echo '%wheel ALL=(ALL) ALL' >> /etc/sudoers
+echo '>> Установка пароля root'
+echo "root:${pass}" | chpasswd
+
+echo '>> Создание пользователя'
+useradd -m "$username"
+usermod -aG wheel,audio,video,storage "$username"
+echo "${username}:${pass}" | chpasswd
+
+echo '>> Настройка прав sudo для группы wheel'
+sed -i 's/# %wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) ALL/' /etc/sudoers
 
 echo '--------------------------------------------------'
 echo '|            Установка XFCE4 и SDDM              |'
 echo '--------------------------------------------------'
 
-pacman -S sddm xfce4 --nocinfirm
+pacman -S sddm xfce4 --noconfirm
 systemctl enable sddm
-sleep $sleep
-
 
 echo '--------------------------------------------------'
-echo '|               Установка rEFInd                  |'
+echo '|               Установка rEFInd                 |'
 echo '--------------------------------------------------'
 
-pacman -Sy refind gdisk --noconfirm 
+pacman -S refind gdisk --noconfirm
 refind-install
-sed -i "options  'root=PARTUUID=/dev/nvme0n1p5 rw add_efi_memmap'" /boot/efi/EFI/refind/refind.conf
+
+# Получаем PARTUUID корневого раздела
+ROOT_PARTUUID=$(blkid -s PARTUUID -o value "$root_part")
+
+# Добавляем запись загрузчика в refind.conf
+cat >> /boot/efi/EFI/refind/refind.conf <<EOF
+
+menuentry "Arch Linux" {
+    icon     /EFI/refind/icons/os_arch.png
+    loader   /vmlinuz-linux
+    initrd   /initramfs-linux.img
+    options  "root=PARTUUID=${ROOT_PARTUUID} rw add_efi_memmap"
+    submenuentry "Boot using fallback initramfs" {
+        initrd /initramfs-linux-fallback.img
+    }
+}
+EOF
 
 echo '--------------------------------------------------'
-echo '|            Установка zsh и ohmyzsh             |'
+echo '|            Установка zsh и oh-my-zsh           |'
 echo '--------------------------------------------------'
 
-pacman -S zsh git --noconfirm
-chsh -s /bin/zsh
-sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
+pacman -S zsh git curl --noconfirm
+chsh -s /bin/zsh "$username"
+
+# Устанавливаем oh-my-zsh для пользователя без интерактивного режима
+su -c 'sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended' "$username"
