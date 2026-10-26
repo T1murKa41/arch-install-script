@@ -1,93 +1,92 @@
-#!/bin/bash
+#!/usr/bin/env bash
+#
+# Настройка новой системы внутри arch-chroot. Запускается из script.sh:
+#   chroot_setup.sh <user> <hostname> <timezone> <root_uuid> <ucode> <desktop> <zsh>
+# Пароли сюда не передаются — script.sh задаёт их отдельно через chpasswd.
 
-set -e
+set -Eeuo pipefail
+trap 'echo "Ошибка в строке $LINENO: $BASH_COMMAND" >&2' ERR
 
 username=$1
 hostname=$2
-pass=$3
-root_part=$4
+timezone=$3
+root_uuid=$4
+ucode=$5
+install_desktop=$6
+install_zsh=$7
 
-ucode=intel
+info()   { echo ">> $*"; }
+warn()   { echo "!! $*" >&2; }
+header() { echo; echo "== $* =="; }
+pac()    { pacman -S --noconfirm --needed "$@"; }
 
-echo '>> Настройка часового пояса'
-ln -sf /usr/share/zoneinfo/Europe/Moscow /etc/localtime
+header 'Время и локаль'
+ln -sf "/usr/share/zoneinfo/$timezone" /etc/localtime
 hwclock --systohc
 
-echo '>> Настройка локали'
-sed -i 's/#en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/g' /etc/locale.gen
-sed -i 's/#ru_RU.UTF-8 UTF-8/ru_RU.UTF-8 UTF-8/g' /etc/locale.gen
+sed -i -e 's/^#\(en_US\.UTF-8 UTF-8\)/\1/' -e 's/^#\(ru_RU\.UTF-8 UTF-8\)/\1/' /etc/locale.gen
 locale-gen
 echo 'LANG=ru_RU.UTF-8' > /etc/locale.conf
+printf 'KEYMAP=ru\nFONT=cyr-sun16\n' > /etc/vconsole.conf
 
-echo '>> Настройка клавиатуры в консоли'
-echo -e 'KEYMAP=ru\nFONT=cyr-sun16\n' > /etc/vconsole.conf
-
-echo '>> Установка текстовых редакторов и sudo'
-pacman -S vim nano sudo --noconfirm
-
-echo '>> Настройка hostname и hosts'
+header 'Имя хоста и сеть'
 echo "$hostname" > /etc/hostname
 cat > /etc/hosts <<EOF
-127.0.0.1    localhost
-::1          localhost
-127.0.1.1    ${hostname}.localdomain    ${hostname}
+127.0.0.1   localhost
+::1         localhost
+127.0.1.1   $hostname.localdomain $hostname
 EOF
 
-echo '>> Установка сети'
-pacman -S networkmanager --noconfirm
-systemctl enable NetworkManager
+sed -i -e 's/^#Color/Color/' -e 's/^#\?ParallelDownloads.*/ParallelDownloads = 5/' /etc/pacman.conf
 
-echo '>> Установка микрокода процессора'
-pacman -S "${ucode}-ucode" --noconfirm
+systemctl enable NetworkManager systemd-timesyncd fstrim.timer
 
-echo '>> Установка пароля root'
-echo "root:${pass}" | chpasswd
+header 'Пользователь и sudo'
+useradd -m -G wheel,audio,video,storage -s /bin/bash "$username"
 
-echo '>> Создание пользователя'
-useradd -m "$username"
-usermod -aG wheel,audio,video,storage "$username"
-echo "${username}:${pass}" | chpasswd
+# Отдельный файл в sudoers.d безопаснее правки /etc/sudoers; проверяем синтаксис через visudo
+echo '%wheel ALL=(ALL:ALL) ALL' > /etc/sudoers.d/10-wheel
+chmod 440 /etc/sudoers.d/10-wheel
+visudo -cf /etc/sudoers.d/10-wheel >/dev/null
 
-echo '>> Настройка прав sudo для группы wheel'
-sed -i 's/# %wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) ALL/' /etc/sudoers
+if [[ $install_desktop == yes ]]; then
+    header 'XFCE4, SDDM, Firefox'
+    pac xorg-server xfce4 sddm firefox network-manager-applet \
+        pipewire pipewire-pulse wireplumber
+    systemctl enable sddm
+fi
 
-echo '--------------------------------------------------'
-echo '|            Установка XFCE4 и SDDM              |'
-echo '--------------------------------------------------'
+header 'Загрузчик rEFInd'
+mkinitcpio -P
 
-pacman -S sddm xfce4 --noconfirm
-systemctl enable sddm
+if ! refind-install; then
+    warn 'refind-install не смог создать запись в NVRAM, ставлю в резервный путь EFI/BOOT'
+    refind-install --usedefault "$(findmnt -no SOURCE /boot/efi)"
+fi
 
-echo '--------------------------------------------------'
-echo '|               Установка rEFInd                 |'
-echo '--------------------------------------------------'
+# Ядро лежит в /boot на ext4-разделе — rEFInd нужен драйвер для его чтения
+install -Dm644 /usr/share/refind/drivers_x64/ext4_x64.efi \
+    /boot/efi/EFI/refind/drivers_x64/ext4_x64.efi
 
-pacman -S refind gdisk --noconfirm
-refind-install
+ucode_opt=''
+[[ $ucode != none ]] && ucode_opt="initrd=boot\\$ucode-ucode.img "
 
-# Получаем PARTUUID корневого раздела
-ROOT_PARTUUID=$(blkid -s PARTUUID -o value "$root_part")
-
-# Добавляем запись загрузчика в refind.conf
-cat >> /boot/efi/EFI/refind/refind.conf <<EOF
-
-menuentry "Arch Linux" {
-    icon     /EFI/refind/icons/os_arch.png
-    loader   /vmlinuz-linux
-    initrd   /initramfs-linux.img
-    options  "root=PARTUUID=${ROOT_PARTUUID} rw add_efi_memmap"
-    submenuentry "Boot using fallback initramfs" {
-        initrd /initramfs-linux-fallback.img
-    }
-}
+cat > /boot/refind_linux.conf <<EOF
+"Arch Linux"            "root=UUID=$root_uuid rw ${ucode_opt}initrd=boot\\initramfs-linux.img"
+"Arch Linux (fallback)" "root=UUID=$root_uuid rw ${ucode_opt}initrd=boot\\initramfs-linux-fallback.img"
 EOF
 
-echo '--------------------------------------------------'
-echo '|            Установка zsh и oh-my-zsh           |'
-echo '--------------------------------------------------'
+if [[ $install_zsh == yes ]]; then
+    header 'zsh и oh-my-zsh'
+    pac zsh git curl
 
-pacman -S zsh git curl --noconfirm
-chsh -s /bin/zsh "$username"
+    omz_url=https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh
+    if su - "$username" -c "RUNZSH=no CHSH=no sh -c \"\$(curl -fsSL $omz_url)\" '' --unattended"; then
+        chsh -s /bin/zsh "$username"
+    else
+        warn 'не удалось установить oh-my-zsh, оставляю bash'
+    fi
+fi
 
-# Устанавливаем oh-my-zsh для пользователя без интерактивного режима
-su -c 'sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended' "$username"
+rm -f -- "$0"
+info 'Настройка в chroot завершена'
